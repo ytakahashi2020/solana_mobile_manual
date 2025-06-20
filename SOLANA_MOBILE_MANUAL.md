@@ -33,15 +33,60 @@ solana-mobile-app/
 
 ## ステップ1: プロジェクト初期化
 
-### 1.1 Expoテンプレートを使用してプロジェクトを作成
+### 1.1 プロジェクト作成方法
+
+**方法1: Solana Mobileテンプレートを使用（推奨）**
 ```bash
-yarn create expo-app solana-mobile-app --template @solana-mobile/solana-mobile-expo-template
+# npm版でSolana Mobileテンプレートを使用
+npm create expo-app@latest solana-mobile-app -- --template @solana-mobile/solana-mobile-expo-template
 cd solana-mobile-app
+```
+
+**方法2: 手動作成（テンプレートエラー時）**
+```bash
+# 基本のExpoプロジェクトを作成
+npx create-expo-app@latest solana-mobile-app --template blank-typescript
+cd solana-mobile-app
+
+# または、既存ディレクトリに作成
+mkdir solana-mobile-app
+cd solana-mobile-app
+npm init -y
 ```
 
 ### 1.2 依存関係の確認とインストール
 ```bash
-yarn install
+# 基本インストール（テンプレート使用時は既にインストール済み）
+npm install
+
+# 手動作成時に必要な依存関係を追加
+npm install @solana-mobile/mobile-wallet-adapter-protocol@^2.0.0
+npm install @solana-mobile/mobile-wallet-adapter-protocol-web3js@^2.0.0
+npm install @solana/web3.js@^1.87.6
+npm install react-native-get-random-values@~1.9.0
+npm install buffer@^6.0.3
+npm install expo@~49.0.0
+npm install expo-status-bar@~1.6.0
+npm install expo-linking@~5.0.2
+npm install expo-constants@~14.4.2
+npm install expo-splash-screen@~0.20.5
+npm install react@18.2.0
+npm install react-native@0.72.3
+
+# TypeScript開発依存関係
+npm install -D @babel/core@^7.20.0
+npm install -D @types/react@~18.2.14
+npm install -D @types/react-native@~0.72.2
+npm install -D typescript@^5.1.3
+```
+
+**一括インストール版:**
+```bash
+# 全ての依存関係を一度にインストール
+npm install @solana-mobile/mobile-wallet-adapter-protocol@^2.0.0 @solana-mobile/mobile-wallet-adapter-protocol-web3js@^2.0.0 @solana/web3.js@^1.87.6 react-native-get-random-values@~1.9.0 buffer@^6.0.3 expo@~49.0.0 expo-status-bar@~1.6.0 expo-linking@~5.0.2 expo-constants@~14.4.2 expo-splash-screen@~0.20.5 react@18.2.0 react-native@0.72.3
+
+# 開発依存関係
+npm install -D @babel/core@^7.20.0 @types/react@~18.2.14 @types/react-native@~0.72.2 typescript@^5.1.3
 ```
 
 ## ステップ2: 必要な依存関係の理解
@@ -94,9 +139,17 @@ config.resolver.alias = {
 module.exports = config;
 ```
 
-## ステップ4: 基本コンポーネントの実装
+## ステップ4: 基本コンポーネントの完全実装
 
-### 4.1 ConnectionProvider (src/components/providers/ConnectionProvider.tsx)
+### 4.1 ディレクトリ構造の作成
+```bash
+mkdir -p src/components/providers
+mkdir -p src/components
+mkdir -p src/screens
+mkdir -p src/utils
+```
+
+### 4.2 ConnectionProvider (src/components/providers/ConnectionProvider.tsx)
 Solanaネットワークへの接続を管理するプロバイダーコンポーネント：
 
 ```typescript
@@ -134,7 +187,7 @@ export function ConnectionProvider({
 export const useConnection = (): ConnectionProviderContext => useContext(ConnectionContext);
 ```
 
-### 4.2 AuthorizationProvider (src/components/providers/AuthorizationProvider.tsx)
+### 4.3 AuthorizationProvider (src/components/providers/AuthorizationProvider.tsx)
 ウォレット認証状態を管理するプロバイダーコンポーネント：
 
 ```typescript
@@ -154,37 +207,605 @@ export interface AuthorizationProviderContext {
   selectedAccount: PublicKey | null;
 }
 
-// 実装の詳細は省略...
+const AuthorizationContext = createContext<AuthorizationProviderContext>({
+  accounts: null,
+  authorizeSession: async (_wallet: AuthorizeAPI) => {
+    throw new Error('AuthorizationProvider not initialized');
+  },
+  deauthorizeSession: (_wallet: AuthorizeAPI) => {
+    throw new Error('AuthorizationProvider not initialized');
+  },
+  onChangeAccount: (_nextSelectedAccount: PublicKey) => {
+    throw new Error('AuthorizationProvider not initialized');
+  },
+  selectedAccount: null,
+});
+
+export interface AuthorizationProviderProps {
+  children: ReactNode;
+}
+
+function getAccountFromBase64Address(address: Base64EncodedAddress): PublicKey {
+  return new PublicKey(address);
+}
+
+export function AuthorizationProvider({children}: AuthorizationProviderProps) {
+  const [accounts, setAccounts] = useState<PublicKey[] | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<PublicKey | null>(null);
+
+  const authorizeSession = useCallback(async (wallet: AuthorizeAPI): Promise<AuthToken> => {
+    const authorizationResult = await wallet.authorize({
+      cluster: 'devnet',
+      identity: {
+        name: 'Solana Mobile App',
+        uri: 'https://solanamobile.com',
+        icon: 'favicon.ico',
+      },
+    });
+
+    const receivedAccounts = authorizationResult.accounts.map(getAccountFromBase64Address);
+    setAccounts(receivedAccounts);
+    setSelectedAccount(receivedAccounts[0]);
+
+    return authorizationResult.auth_token;
+  }, []);
+
+  const deauthorizeSession = useCallback(async (wallet: AuthorizeAPI) => {
+    await wallet.deauthorize({auth_token: ''});
+    setAccounts(null);
+    setSelectedAccount(null);
+  }, []);
+
+  const onChangeAccount = useCallback((nextSelectedAccount: PublicKey) => {
+    setSelectedAccount(nextSelectedAccount);
+  }, []);
+
+  return (
+    <AuthorizationContext.Provider
+      value={{
+        accounts,
+        authorizeSession,
+        deauthorizeSession,
+        onChangeAccount,
+        selectedAccount,
+      }}>
+      {children}
+    </AuthorizationContext.Provider>
+  );
+}
+
+export const useAuthorization = (): AuthorizationProviderContext => useContext(AuthorizationContext);
 ```
 
-### 4.3 メインコンポーネント群
+### 4.4 ConnectButton (src/components/ConnectButton.tsx)
+ウォレット接続ボタンコンポーネント：
 
-#### ConnectButton - ウォレット接続ボタン
-- `@solana-mobile/mobile-wallet-adapter-protocol-web3js`の`transact`関数を使用
-- ウォレット認証の開始処理
+```typescript
+import React, {useCallback, useState} from 'react';
+import {Alert, Button} from 'react-native';
+import {transact} from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
+import {useAuthorization} from './providers/AuthorizationProvider';
 
-#### AccountInfo - アカウント情報表示
-- 選択されたアカウントのアドレス表示
-- SOL残高の取得と表示
+export default function ConnectButton() {
+  const {authorizeSession} = useAuthorization();
+  const [authorizationInProgress, setAuthorizationInProgress] = useState(false);
 
-#### RequestAirdropButton - エアドロップ要求
-- DevNet環境でのSOLエアドロップ機能
-- `connection.requestAirdrop()`の使用
+  const handleConnectPress = useCallback(async () => {
+    try {
+      if (authorizationInProgress) {
+        return;
+      }
+      setAuthorizationInProgress(true);
+      await transact(async (wallet) => {
+        await authorizeSession(wallet);
+      });
+    } catch (err: any) {
+      Alert.alert(
+        'Error',
+        err?.message || 'Failed to connect to wallet',
+      );
+    } finally {
+      setAuthorizationInProgress(false);
+    }
+  }, [authorizeSession, authorizationInProgress]);
 
-#### SignMessageButton - メッセージ署名
-- 任意のメッセージに対する署名機能
-- `wallet.signMessages()`の使用
+  return (
+    <Button
+      title={authorizationInProgress ? 'Connecting...' : 'Connect Wallet'}
+      onPress={handleConnectPress}
+      disabled={authorizationInProgress}
+    />
+  );
+}
+```
 
-#### SignInButton - サインイン機能
-- SIWS (Sign-In with Solana) プロトコルの実装
-- `wallet.signIn()`の使用
+### 4.5 AccountInfo (src/components/AccountInfo.tsx)
+アカウント情報表示コンポーネント：
 
-### 4.4 MainScreen (src/screens/MainScreen.tsx)
+```typescript
+import React, {useCallback, useEffect, useState} from 'react';
+import {View, Text, StyleSheet} from 'react-native';
+import {LAMPORTS_PER_SOL} from '@solana/web3.js';
+import {useConnection} from './providers/ConnectionProvider';
+import {useAuthorization} from './providers/AuthorizationProvider';
+
+export default function AccountInfo() {
+  const {connection} = useConnection();
+  const {selectedAccount} = useAuthorization();
+  const [balance, setBalance] = useState<number | null>(null);
+
+  const fetchAndUpdateBalance = useCallback(async () => {
+    if (!selectedAccount) {
+      return;
+    }
+    try {
+      const lamports = await connection.getBalance(selectedAccount);
+      setBalance(lamports / LAMPORTS_PER_SOL);
+    } catch (error) {
+      console.error('Failed to fetch balance:', error);
+      setBalance(null);
+    }
+  }, [connection, selectedAccount]);
+
+  useEffect(() => {
+    if (selectedAccount) {
+      fetchAndUpdateBalance();
+    } else {
+      setBalance(null);
+    }
+  }, [selectedAccount, fetchAndUpdateBalance]);
+
+  if (!selectedAccount) {
+    return null;
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Account Info</Text>
+      <Text style={styles.label}>Address:</Text>
+      <Text style={styles.value}>{selectedAccount.toBase58()}</Text>
+      <Text style={styles.label}>Balance:</Text>
+      <Text style={styles.value}>
+        {balance !== null ? `${balance} SOL` : 'Loading...'}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    margin: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
+    color: '#333',
+  },
+  value: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+});
+```
+
+### 4.6 RequestAirdropButton (src/components/RequestAirdropButton.tsx)
+DevNet SOLエアドロップボタンコンポーネント：
+
+```typescript
+import React, {useCallback, useState} from 'react';
+import {Alert, Button} from 'react-native';
+import {LAMPORTS_PER_SOL} from '@solana/web3.js';
+import {useConnection} from './providers/ConnectionProvider';
+import {useAuthorization} from './providers/AuthorizationProvider';
+
+export default function RequestAirdropButton() {
+  const {connection} = useConnection();
+  const {selectedAccount} = useAuthorization();
+  const [airdropInProgress, setAirdropInProgress] = useState(false);
+
+  const requestAirdrop = useCallback(async () => {
+    if (!selectedAccount) {
+      Alert.alert('Error', 'Please connect your wallet first');
+      return;
+    }
+
+    try {
+      setAirdropInProgress(true);
+      const signature = await connection.requestAirdrop(
+        selectedAccount,
+        LAMPORTS_PER_SOL
+      );
+      
+      await connection.confirmTransaction(signature);
+      Alert.alert('Success', '1 SOL airdropped successfully!');
+    } catch (error: any) {
+      Alert.alert(
+        'Error',
+        error?.message || 'Failed to request airdrop'
+      );
+    } finally {
+      setAirdropInProgress(false);
+    }
+  }, [connection, selectedAccount]);
+
+  if (!selectedAccount) {
+    return null;
+  }
+
+  return (
+    <Button
+      title={airdropInProgress ? 'Requesting...' : 'Request Airdrop (1 SOL)'}
+      onPress={requestAirdrop}
+      disabled={airdropInProgress}
+    />
+  );
+}
+```
+
+### 4.7 SignMessageButton (src/components/SignMessageButton.tsx)
+メッセージ署名コンポーネント：
+
+```typescript
+import React, {useCallback, useState} from 'react';
+import {Alert, Button} from 'react-native';
+import {transact} from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
+import {useAuthorization} from './providers/AuthorizationProvider';
+
+export default function SignMessageButton() {
+  const {selectedAccount} = useAuthorization();
+  const [signingInProgress, setSigningInProgress] = useState(false);
+
+  const signMessage = useCallback(async () => {
+    if (!selectedAccount) {
+      Alert.alert('Error', 'Please connect your wallet first');
+      return;
+    }
+
+    try {
+      setSigningInProgress(true);
+      const message = `Hello from Solana Mobile! Timestamp: ${Date.now()}`;
+      const messageBytes = new TextEncoder().encode(message);
+
+      await transact(async (wallet) => {
+        const signedMessages = await wallet.signMessages({
+          addresses: [selectedAccount.toBase58()],
+          payloads: [messageBytes],
+        });
+        
+        Alert.alert(
+          'Message Signed!',
+          `Message: ${message}\nSignature: ${signedMessages[0].slice(0, 32)}...`
+        );
+      });
+    } catch (error: any) {
+      Alert.alert(
+        'Error',
+        error?.message || 'Failed to sign message'
+      );
+    } finally {
+      setSigningInProgress(false);
+    }
+  }, [selectedAccount]);
+
+  if (!selectedAccount) {
+    return null;
+  }
+
+  return (
+    <Button
+      title={signingInProgress ? 'Signing...' : 'Sign Message'}
+      onPress={signMessage}
+      disabled={signingInProgress}
+    />
+  );
+}
+```
+
+### 4.8 SignInButton (src/components/SignInButton.tsx)
+Sign-In with Solana (SIWS) コンポーネント：
+
+```typescript
+import React, {useCallback, useState} from 'react';
+import {Alert, Button} from 'react-native';
+import {transact} from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
+import {useAuthorization} from './providers/AuthorizationProvider';
+
+export default function SignInButton() {
+  const {selectedAccount} = useAuthorization();
+  const [signInInProgress, setSignInInProgress] = useState(false);
+
+  const signIn = useCallback(async () => {
+    if (!selectedAccount) {
+      Alert.alert('Error', 'Please connect your wallet first');
+      return;
+    }
+
+    try {
+      setSignInInProgress(true);
+      const domain = 'solanamobile.com';
+      const statement = 'Please sign this message to authenticate with our app.';
+      const uri = 'https://solanamobile.com';
+      const version = '1';
+      const nonce = Math.random().toString(36).substring(7);
+      const issuedAt = new Date().toISOString();
+
+      await transact(async (wallet) => {
+        const result = await wallet.signIn({
+          domain,
+          statement,
+          uri,
+          version,
+          nonce,
+          issuedAt,
+          address: selectedAccount.toBase58(),
+        });
+        
+        Alert.alert(
+          'Sign In Successful!',
+          `Signed message for domain: ${result.signedMessage?.domain || domain}`
+        );
+      });
+    } catch (error: any) {
+      Alert.alert(
+        'Error',
+        error?.message || 'Failed to sign in'
+      );
+    } finally {
+      setSignInInProgress(false);
+    }
+  }, [selectedAccount]);
+
+  if (!selectedAccount) {
+    return null;
+  }
+
+  return (
+    <Button
+      title={signInInProgress ? 'Signing In...' : 'Sign In'}
+      onPress={signIn}
+      disabled={signInInProgress}
+    />
+  );
+}
+```
+
+### 4.9 MainScreen (src/screens/MainScreen.tsx)
 すべてのコンポーネントを統合したメイン画面：
 
 ```typescript
 import React from 'react';
-import {SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import ConnectButton from '../components/ConnectButton';
+import AccountInfo from '../components/AccountInfo';
+import RequestAirdropButton from '../components/RequestAirdropButton';
+import SignMessageButton from '../components/SignMessageButton';
+import SignInButton from '../components/SignInButton';
+import {useAuthorization} from '../components/providers/AuthorizationProvider';
+
+export default function MainScreen() {
+  const {selectedAccount} = useAuthorization();
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic">
+        <View style={styles.header}>
+          <Text style={styles.title}>Solana Mobile App</Text>
+          <Text style={styles.subtitle}>React Native dApp Example</Text>
+        </View>
+
+        <View style={styles.section}>
+          <ConnectButton />
+        </View>
+
+        {selectedAccount && (
+          <>
+            <AccountInfo />
+            
+            <View style={styles.section}>
+              <RequestAirdropButton />
+            </View>
+
+            <View style={styles.section}>
+              <SignMessageButton />
+            </View>
+
+            <View style={styles.section}>
+              <SignInButton />
+            </View>
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 4,
+  },
+  section: {
+    margin: 16,
+  },
+});
+```
+
+### 4.10 App.tsx - アプリケーションエントリーポイント
+```typescript
+import 'react-native-get-random-values';
+import React from 'react';
+import {StatusBar} from 'expo-status-bar';
+import {ConnectionProvider} from './src/components/providers/ConnectionProvider';
+import {AuthorizationProvider} from './src/components/providers/AuthorizationProvider';
+import MainScreen from './src/screens/MainScreen';
+
+export default function App() {
+  return (
+    <ConnectionProvider>
+      <AuthorizationProvider>
+        <MainScreen />
+        <StatusBar style="auto" />
+      </AuthorizationProvider>
+    </ConnectionProvider>
+  );
+}
+```
+
+### 4.11 必要な設定ファイル
+
+#### package.json
+```json
+{
+  "name": "solana-mobile-app",
+  "version": "1.0.0",
+  "main": "__generated__/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@solana-mobile/mobile-wallet-adapter-protocol": "^2.0.0",
+    "@solana-mobile/mobile-wallet-adapter-protocol-web3js": "^2.0.0",
+    "@solana/web3.js": "^1.87.6",
+    "expo": "~49.0.0",
+    "expo-status-bar": "~1.6.0",
+    "react": "18.2.0",
+    "react-native": "0.72.3",
+    "react-native-get-random-values": "~1.9.0",
+    "expo-linking": "~5.0.2",
+    "expo-constants": "~14.4.2",
+    "buffer": "^6.0.3",
+    "expo-splash-screen": "~0.20.5"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@types/react": "~18.2.14",
+    "@types/react-native": "~0.72.2",
+    "typescript": "^5.1.3"
+  },
+  "private": true
+}
+```
+
+#### app.json
+```json
+{
+  "expo": {
+    "name": "Solana Mobile App",
+    "slug": "solana-mobile-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "platforms": ["android"],
+    "android": {
+      "package": "com.solanamobile.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": {
+            "scheme": "https",
+            "host": "solanamobile.com"
+          }
+        }
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
+```
+
+#### metro.config.js
+```javascript
+const { getDefaultConfig } = require('expo/metro-config');
+
+const config = getDefaultConfig(__dirname);
+
+// Add polyfills required for @solana/web3.js
+config.resolver.assetExts.push('cjs');
+
+config.resolver.alias = {
+  ...config.resolver.alias,
+  crypto: 'react-native-get-random-values',
+  buffer: 'buffer',
+};
+
+// Add global polyfills
+config.transformer.getTransformOptions = async () => ({
+  transform: {
+    experimentalImportSupport: false,
+    inlineRequires: true,
+  },
+});
+
+module.exports = config;
+```
+
+#### babel.config.js
+```javascript
+module.exports = function(api) {
+  api.cache(true);
+  return {
+    presets: ['babel-preset-expo'],
+  };
+};
+```
+
+#### tsconfig.json
+```json
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true
+  }
+}
+```
 import ConnectButton from '../components/ConnectButton';
 import AccountInfo from '../components/AccountInfo';
 // その他のインポート...
@@ -463,7 +1084,7 @@ cd /path/to/solana-mobile-app
 adb devices
 
 # 3. 依存関係インストール
-yarn install --ignore-engines
+npm install
 
 # 4. app.jsonにパッケージ名があることを確認
 cat app.json | grep "package"
@@ -500,7 +1121,7 @@ adb devices
 # 期待される出力: emulator-5554	device
 
 # 6. 依存関係インストール
-yarn install --ignore-engines
+npm install
 
 # 7. カスタム開発ビルド実行
 npx expo run:android
@@ -514,7 +1135,7 @@ npx expo run:android -d emulator-5554
 › Using current versions instead of recommended react-native@0.72.10.
 ✔ Created native project | gitignore skipped
 ✔ Updated package.json and added index.js entry point for iOS and Android
-› Installing using yarn
+› Installing using npm
 ✔ Built bundle | android
 ✔ Built Android app
 ✔ Installed app on device emulator-5554
@@ -542,7 +1163,7 @@ npx expo start --clear
 
 # node_modulesを削除して再インストール
 rm -rf node_modules
-yarn install --ignore-engines
+npm install
 ```
 
 **問題3: polyfillエラー**
@@ -632,7 +1253,7 @@ adb devices
 npx expo run:android --no-install
 
 # または依存関係を事前に修正
-yarn install --ignore-engines
+npm install
 npx expo install --fix
 ```
 
